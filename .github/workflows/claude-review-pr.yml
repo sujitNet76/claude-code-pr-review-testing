@@ -1,4 +1,4 @@
-name: Claude PR Review
+name: Claude PR Review (Comment Only)
 
 on:
   pull_request:
@@ -8,13 +8,16 @@ jobs:
   review:
     runs-on: ubuntu-latest
 
+    # 🔐 Minimal permissions
     permissions:
-      pull-requests: write
       contents: read
+      pull-requests: write   # only needed to comment
 
     steps:
-      - name: Checkout code
+      - name: Checkout code (read-only)
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Get PR diff
         run: |
@@ -22,8 +25,7 @@ jobs:
           git diff origin/${{ github.base_ref }} > pr_diff.txt
 
       - name: Install Python dependencies
-        run: |
-          pip install requests
+        run: pip install requests
 
       - name: Send diff to Claude
         env:
@@ -33,18 +35,28 @@ jobs:
           import os
           import requests
           import json
+          import sys
 
-          api_key = os.environ["ANTHROPIC_API_KEY"]
+          api_key = os.environ.get("ANTHROPIC_API_KEY")
 
           with open("pr_diff.txt", "r") as f:
               diff = f.read()
 
-          prompt = f"""
-          You are a senior software engineer.
-          Review this pull request diff.
-          Give clear feedback, improvements, and potential bugs.
+          if not diff.strip():
+              print("No changes detected.")
+              sys.exit(0)
 
-          PR DIFF:
+          prompt = f"""
+          You are a senior code reviewer.
+
+          IMPORTANT:
+          - Do NOT rewrite the full code.
+          - Do NOT output replacement files.
+          - Only provide suggestions and explanations.
+          - Be concise and structured.
+
+          Review this pull request diff:
+
           {diff}
           """
 
@@ -56,7 +68,7 @@ jobs:
                   "content-type": "application/json"
               },
               json={
-                  "model": "claude-3-sonnet-20240229",
+                  "model": "claude-3-5-sonnet-20241022",
                   "max_tokens": 800,
                   "messages": [
                       {"role": "user", "content": prompt}
@@ -64,7 +76,13 @@ jobs:
               }
           )
 
-          review = response.json()["content"][0]["text"]
+          data = response.json()
+
+          if response.status_code != 200:
+              print("API Error:", data)
+              sys.exit(1)
+
+          review = data["content"][0]["text"]
 
           with open("review.txt", "w") as f:
               f.write(review)
@@ -81,5 +99,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: "🤖 **Claude AI Review**\n\n" + review
+              body: "🤖 **Claude AI Suggestions (Review Only)**\n\n" + review
             });
