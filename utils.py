@@ -2,6 +2,7 @@ import os
 import asyncio
 from datetime import datetime
 
+from conversation_context_preprocessor.conversation_context_preprocessor import ConversationContextPreprocessor
 from fastapi import Request
 from langchain_core.messages import messages_from_dict
 from common.formatters.chat_history.utils import remove_tool_calls
@@ -11,7 +12,17 @@ from connections.async_kafka.aiokafka_producer import AsyncKafkaProducerSingleto
 from connections.kafka.kafka_producer import KafkaProducer
 from configurations.config import get_config, get_dm_config_proxy, get_openai_tracker
 import openai
-from modules.llm_prediction_service.exceptions import *
+from modules.llm_prediction_service.exceptions import (
+    CustomException,
+    LLMExceptions,
+    LLMApiTimeoutError,
+    LLMApiConnectionError,
+    LLMApiAuthenticationError,
+    LLMApiRateLimitError,
+    LLMApiBadRequestError,
+    LLMApiNotFoundError,
+    LLMApiInternalServerError,
+)
 from common.llm_model.constants import DefaultResponseGenerationModel, LLMServiceType, DefaultAgenticOSModel
 from apps.llm_prediction.models import LLMAnsRequest, LLMAnsResponse, LLMAnsSyncRequest, RetrieverRequest
 from common.models.conversation_tracker_event import ConversationTrackerEventObject
@@ -68,7 +79,7 @@ def get_llm_info_by_service_name(llm_infos: list[dict], service_name: str) -> LL
         if (llm_info.get("serviceName", "") == service_name) or (config_dict.get("serviceName", "") == service_name):
             task_config = config_dict.get('taskConfig')
             if not task_config:
-                '''NOTE -> This condition is for temporary release'''
+                # NOTE: This condition is for temporary release
                 if service_name == LLMServiceType.MODEL_CREATION.value:
                     task_config = [{'task': 'EMBEDDING_CREATION',
                                     'provider': llm_info['selectedGenerativeAIAlgorithm']['generativeAIModels'][0]['serviceProvider'],
@@ -92,6 +103,7 @@ def get_llm_info_by_service_name(llm_infos: list[dict], service_name: str) -> LL
                                  task_config=task_config
                                  )
     return None
+
 
 def get_default_llm_info(service_name):
     """
@@ -121,7 +133,7 @@ def get_default_llm_info(service_name):
                          task_config=task_config)
 
 
-async def get_llm_info(request: LLMAnsSyncRequest | LLMAnsSyncRequest | RetrieverRequest | LLMAnsRequest, service_name: str,
+async def get_llm_info(request: LLMAnsSyncRequest | RetrieverRequest | LLMAnsRequest, service_name: str,
                        *, override_use_cache: Optional[bool] = None) -> LLMConfigData:
 
     """
@@ -161,7 +173,7 @@ async def get_llm_info(request: LLMAnsSyncRequest | LLMAnsSyncRequest | Retrieve
                 logger.warning(f"Using default configuration for bot_id: {bot_id}")
                 return get_default_llm_info(service_name=service_name)
         else:
-            logger.warning(f"Didn't got data from api using default configuration for bot_id: {bot_id}")
+            logger.warning(f"Didn't get data from api using default configuration for bot_id: {bot_id}")
             return get_default_llm_info(service_name=service_name)
 
 
@@ -181,7 +193,7 @@ async def get_llm_info(request: LLMAnsSyncRequest | LLMAnsSyncRequest | Retrieve
                 logger.warning(f"Using default configuration for bot_id: {bot_id}")
                 return get_default_llm_info(service_name=service_name)
         else:
-            logger.warning(f"Didn't got data from agent api using default configuration for bot_id: {bot_id}")
+            logger.warning(f"Didn't get data from agent api using default configuration for bot_id: {bot_id}")
             return get_default_llm_info(service_name=service_name)
 
     else:
