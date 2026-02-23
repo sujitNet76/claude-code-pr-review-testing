@@ -1,0 +1,103 @@
+name: Claude PR Review (Comment Only)
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    # 🔐 Minimal permissions
+    permissions:
+      contents: read
+      pull-requests: write   # only needed to comment
+
+    steps:
+      - name: Checkout code (read-only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Get PR diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }} > pr_diff.txt
+
+      - name: Install Python dependencies
+        run: pip install requests
+
+      - name: Send diff to Claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python - <<EOF
+          import os
+          import requests
+          import json
+          import sys
+
+          api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+          with open("pr_diff.txt", "r") as f:
+              diff = f.read()
+
+          if not diff.strip():
+              print("No changes detected.")
+              sys.exit(0)
+
+          prompt = f"""
+          You are a senior code reviewer.
+
+          IMPORTANT:
+          - Do NOT rewrite the full code.
+          - Do NOT output replacement files.
+          - Only provide suggestions and explanations.
+          - Be concise and structured.
+
+          Review this pull request diff:
+
+          {diff}
+          """
+
+          response = requests.post(
+              "https://api.anthropic.com/v1/messages",
+              headers={
+                  "x-api-key": api_key,
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json"
+              },
+              json={
+                  "model": "claude-3-5-sonnet-20241022",
+                  "max_tokens": 800,
+                  "messages": [
+                      {"role": "user", "content": prompt}
+                  ]
+              }
+          )
+
+          data = response.json()
+
+          if response.status_code != 200:
+              print("API Error:", data)
+              sys.exit(1)
+
+          review = data["content"][0]["text"]
+
+          with open("review.txt", "w") as f:
+              f.write(review)
+          EOF
+
+      - name: Post comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('review.txt', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "🤖 **Claude AI Suggestions (Review Only)**\n\n" + review
+            });
