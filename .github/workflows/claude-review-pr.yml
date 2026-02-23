@@ -17,53 +17,58 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Get PR diff
-        id: diff
         run: |
           git fetch origin ${{ github.base_ref }}
           git diff origin/${{ github.base_ref }} > pr_diff.txt
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests
 
       - name: Send diff to Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          pip install anthropic requests
+          python - <<EOF
+          import os
+          import requests
+          import json
 
-          python <<EOF
-import os
-import requests
+          api_key = os.environ["ANTHROPIC_API_KEY"]
 
-api_key = os.environ["ANTHROPIC_API_KEY"]
+          with open("pr_diff.txt", "r") as f:
+              diff = f.read()
 
-with open("pr_diff.txt", "r") as f:
-    diff = f.read()
+          prompt = f"""
+          You are a senior software engineer.
+          Review this pull request diff.
+          Give clear feedback, improvements, and potential bugs.
 
-prompt = f"""
-You are a senior software engineer. Review this pull request diff.
-Give clear feedback, improvements, and potential bugs.
+          PR DIFF:
+          {diff}
+          """
 
-PR DIFF:
-{diff}
-"""
+          response = requests.post(
+              "https://api.anthropic.com/v1/messages",
+              headers={
+                  "x-api-key": api_key,
+                  "anthropic-version": "2023-06-01",
+                  "content-type": "application/json"
+              },
+              json={
+                  "model": "claude-3-sonnet-20240229",
+                  "max_tokens": 800,
+                  "messages": [
+                      {"role": "user", "content": prompt}
+                  ]
+              }
+          )
 
-response = requests.post(
-    "https://api.anthropic.com/v1/messages",
-    headers={
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    },
-    json={
-        "model": "claude-3-sonnet-20240229",
-        "max_tokens": 800,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-)
+          review = response.json()["content"][0]["text"]
 
-review = response.json()["content"][0]["text"]
-
-with open("review.txt", "w") as f:
-    f.write(review)
-EOF
+          with open("review.txt", "w") as f:
+              f.write(review)
+          EOF
 
       - name: Post comment on PR
         uses: actions/github-script@v7
