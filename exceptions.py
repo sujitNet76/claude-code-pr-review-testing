@@ -1,3 +1,8 @@
+from enum import Enum
+
+
+class LLMenum(Enum):
+    openai = "openai"
 
 
 class CustomException(Exception):
