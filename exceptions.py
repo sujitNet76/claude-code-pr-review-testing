@@ -1,5 +1,3 @@
-
-
 class CustomException(Exception):
     """
     Base exception class to all LLM Exceptions
